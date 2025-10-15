@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "scrape": "node src/scrape.js",
+    "build": "npx playwright install chromium && node src/scrape.js",
     "postinstall": "npx playwright install chromium",
     "start": "npx http-server public -p 8080 -c-1"
   },
