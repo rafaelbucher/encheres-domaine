@@ -1,0 +1,111 @@
+name: Scrape + Deploy (preview on push, prod daily 10:00) + Email
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    # run hourly UTC; we'll gate prod deploy at 10:00 Europe/Paris
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  preview_on_push:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: |
+          npm ci || npm i
+          npx playwright install chromium
+
+      - name: Run scraper (generates public/montres.html)
+        run: npm run scrape
+
+      - name: Install Netlify CLI
+        run: npm i -g netlify-cli
+
+      - name: Deploy PREVIEW to Netlify (on push)
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          echo "Deploying preview for commit $GITHUB_SHA"
+          netlify deploy \
+            --dir=public \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN" \
+            --message "Preview $GITHUB_SHA on push"
+
+  daily_prod:
+    # runs for schedule or manual trigger; gates at 10:00 Europe/Paris
+    if: ${{ github.event_name != 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: |
+          npm ci || npm i
+          npx playwright install chromium
+
+      - name: Run scraper (generates public/montres.html)
+        run: npm run scrape
+
+      # Gate: only deploy+notify when it's 10:00 in Europe/Paris (DST-safe)
+      - name: Gate 10:00 Europe/Paris
+        id: gate
+        run: |
+          HOUR=$(TZ='Europe/Paris' date +'%H')
+          if [ "$HOUR" = "10" ]; then
+            echo "at_ten=true" >> $GITHUB_OUTPUT
+          else
+            echo "at_ten=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Netlify CLI
+        if: ${{ steps.gate.outputs.at_ten == 'true' }}
+        run: npm i -g netlify-cli
+
+      - name: Deploy PROD to Netlify (daily 10:00)
+        if: ${{ steps.gate.outputs.at_ten == 'true' }}
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          netlify deploy \
+            --dir=public \
+            --prod \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN" \
+            --message "Daily prod scrape"
+
+      - name: Send email notification
+        if: ${{ steps.gate.outputs.at_ten == 'true' }}
+        uses: dawidd6/action-send-mail@v6
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_APP_PASSWORD }}
+          subject: "Montres — nouvelle page publiée (prod)"
+          to: "rafael.bchr@gmail.com"
+          from: ${{ secrets.MAIL_USERNAME }}
+          html_body: |
+            <p>Bonjour,</p>
+            <p>La page des résultats <strong>Montres</strong> vient d'être régénérée et déployée en production.</p>
+            <p>➡️ <a href="${{ vars.SITE_URL }}/montres.html">Ouvrir la page</a></p>
+            <p>Bonne journée !</p>

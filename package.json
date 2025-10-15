@@ -1,0 +1,17 @@
+{
+  "name": "encheres-montres",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "scrape": "node src/scrape.js",
+    "postinstall": "npx playwright install chromium",
+    "start": "npx http-server public -p 8080 -c-1"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "luxon": "^3.5.0",
+    "playwright": "^1.47.0"
+  },
+  "devDependencies": {}
+}
